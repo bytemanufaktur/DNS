@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 /*
  * This file is part of Badcow DNS Library.
  *
@@ -11,22 +13,26 @@
 
 namespace Badcow\DNS;
 
+use Badcow\DNS\Rdata\A;
+use Badcow\DNS\Rdata\Factory;
 use Badcow\DNS\Rdata\RdataInterface;
+use Badcow\DNS\Rdata\Types;
+use InvalidArgumentException;
 
 class ResourceRecord
 {
     /**
-     * @var string
+     * @var int|null
      */
-    private $class = Classes::INTERNET;
+    private $classId = 1;
 
     /**
-     * @var RdataInterface
+     * @var RdataInterface|null
      */
     private $rdata;
 
     /**
-     * @var int
+     * @var int|null
      */
     private $ttl;
 
@@ -36,7 +42,7 @@ class ResourceRecord
     private $name;
 
     /**
-     * @var string
+     * @var string|null
      */
     private $comment;
 
@@ -46,15 +52,19 @@ class ResourceRecord
      * @param int            $ttl
      * @param string         $class
      * @param string         $comment
+     *
+     * @return ResourceRecord
      */
-    public function __construct(string $name = null, RdataInterface $rdata = null, int $ttl = null, string $class = null, string $comment = null)
+    public static function create(string $name, RdataInterface $rdata, int $ttl = null, string $class = Classes::INTERNET, string $comment = null): ResourceRecord
     {
-        $this->name = $name;
-        $this->rdata = $rdata;
-        $this->ttl = $ttl;
-        $this->setClass($class);
-        $this->rdata = $rdata;
-        $this->comment = $comment;
+        $rr = new self();
+        $rr->setName($name);
+        $rr->setRdata($rdata);
+        $rr->setTtl($ttl);
+        $rr->setClass($class);
+        $rr->setComment($comment);
+
+        return $rr;
     }
 
     /**
@@ -63,22 +73,28 @@ class ResourceRecord
      *
      * @param string $class
      *
-     * @throws \UnexpectedValueException
+     * @throws InvalidArgumentException
      */
     public function setClass(?string $class): void
     {
         if (null !== $class && !Classes::isValid($class)) {
-            throw new \UnexpectedValueException(sprintf('No such class as "%s"', $class));
+            throw new InvalidArgumentException(sprintf('No such class as "%s"', $class));
         }
 
-        $this->class = $class;
+        if (null === $class) {
+            $this->classId = null;
+
+            return;
+        }
+
+        $this->classId = Classes::getClassId($class);
     }
 
     /**
      * Set the name for the resource record.
      * Eg. "subdomain.example.com.".
      *
-     * @param $name
+     * @param string $name
      */
     public function setName(string $name): void
     {
@@ -88,7 +104,7 @@ class ResourceRecord
     /**
      * @param RdataInterface $rdata
      */
-    public function setRdata(RdataInterface $rdata): void
+    public function setRdata(?RdataInterface $rdata): void
     {
         $this->rdata = $rdata;
     }
@@ -98,7 +114,24 @@ class ResourceRecord
      */
     public function getClass(): ?string
     {
-        return $this->class;
+        if (null === $this->classId) {
+            return null;
+        }
+
+        return Classes::getClassName($this->classId);
+    }
+
+    public function setClassId(int $classId): void
+    {
+        $this->classId = $classId;
+    }
+
+    /**
+     * @return int|null
+     */
+    public function getClassId(): ?int
+    {
+        return $this->classId;
     }
 
     /**
@@ -106,7 +139,7 @@ class ResourceRecord
      *
      * @param int $ttl
      */
-    public function setTtl(int $ttl): void
+    public function setTtl(?int $ttl): void
     {
         $this->ttl = $ttl;
     }
@@ -152,7 +185,7 @@ class ResourceRecord
      *
      * @param string $comment
      */
-    public function setComment(string $comment): void
+    public function setComment(?string $comment): void
     {
         $this->comment = $comment;
     }
@@ -165,5 +198,74 @@ class ResourceRecord
     public function getComment(): ?string
     {
         return $this->comment;
+    }
+
+    /**
+     * @return string
+     *
+     * @throws UnsetValueException|InvalidArgumentException
+     */
+    public function toWire(): string
+    {
+        if (null === $this->name) {
+            throw new UnsetValueException('ResourceRecord name has not been set.');
+        }
+
+        if (null === $this->rdata) {
+            throw new UnsetValueException('ResourceRecord rdata has not been set.');
+        }
+
+        if (null === $this->classId) {
+            throw new UnsetValueException('ResourceRecord class has not been set.');
+        }
+
+        if (null === $this->ttl) {
+            throw new UnsetValueException('ResourceRecord TTL has not been set.');
+        }
+
+        if (!Validator::fullyQualifiedDomainName($this->name)) {
+            throw new InvalidArgumentException(sprintf('"%s" is not a fully qualified domain name.', $this->name));
+        }
+
+        $rdata = $this->rdata->toWire();
+
+        $encoded = A::encodeName($this->name);
+        $encoded .= pack('nnNn',
+            $this->rdata->getTypeCode(),
+            $this->classId,
+            $this->ttl,
+            strlen($rdata)
+        );
+        $encoded .= $rdata;
+
+        return $encoded;
+    }
+
+    /**
+     * @param string $encoded
+     * @param int    $offset
+     *
+     * @return ResourceRecord
+     *
+     * @throws Rdata\UnsupportedTypeException
+     */
+    public static function fromWire(string $encoded, int &$offset = 0): ResourceRecord
+    {
+        $rr = new self();
+        $rr->setName(A::decodeName($encoded, $offset));
+        $integers = unpack('ntype/nclass/Nttl/ndlength', $encoded, $offset);
+        $offset += 10;
+        $rr->setClassId($integers['class']);
+        $rr->setTtl($integers['ttl']);
+        $rdLength = $integers['dlength'];
+
+        /** @var callable $callable */
+        $callable = Factory::getRdataClassName(Types::getName($integers['type'])).'::fromWire';
+        /** @var RdataInterface $rdata */
+        $rdata = $callable($encoded, $offset, $rdLength);
+
+        $rr->setRdata($rdata);
+
+        return $rr;
     }
 }

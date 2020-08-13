@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 /*
  * This file is part of Badcow DNS Library.
  *
@@ -11,22 +13,43 @@
 
 namespace Badcow\DNS\Tests\Rdata;
 
+use Badcow\DNS\Rdata\Factory;
 use Badcow\DNS\Rdata\UnsupportedTypeException;
 use PHPUnit\Framework\TestCase;
-use Badcow\DNS\Rdata\Factory;
 
 class FactoryTest extends TestCase
 {
+    public function getTestData(): array
+    {
+        $namespace = '\\Badcow\\DNS\\Rdata\\';
+
+        return [
+            ['CNAME', 5, $namespace.'CNAME'],
+            ['AAAA', 28, $namespace.'AAAA'],
+            ['RRSIG', 46, $namespace.'RRSIG'],
+        ];
+    }
+
+    /**
+     * @dataProvider getTestData
+     *
+     * @param string $type
+     * @param int    $typeCode
+     * @param string $classname
+     *
+     * @throws UnsupportedTypeException
+     */
+    public function testNewRdataFromNameAndId(string $type, int $typeCode, string $classname): void
+    {
+        $this->assertInstanceOf($classname, Factory::newRdataFromName($type));
+        $this->assertInstanceOf($classname, Factory::newRdataFromId($typeCode));
+    }
+
     /**
      * @throws UnsupportedTypeException
      */
-    public function testNewRdataFromName()
+    public function testNewRdataFromNameThrowsExceptionForUnknownType(): void
     {
-        $namespace = '\\Badcow\\DNS\\Rdata\\';
-        $this->assertInstanceOf($namespace.'CNAME', Factory::newRdataFromName('cname'));
-        $this->assertInstanceOf($namespace.'AAAA', Factory::newRdataFromName('Aaaa'));
-        $this->assertInstanceOf($namespace.'DNSSEC\\RRSIG', Factory::newRdataFromName('rrsig'));
-
         $this->expectException(UnsupportedTypeException::class);
         Factory::newRdataFromName('rsig');
     }

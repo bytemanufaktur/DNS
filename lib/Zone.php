@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 /*
  * This file is part of Badcow DNS Library.
  *
@@ -11,7 +13,7 @@
 
 namespace Badcow\DNS;
 
-class Zone implements \Countable, \IteratorAggregate
+class Zone implements \Countable, \IteratorAggregate, \ArrayAccess
 {
     /**
      * @var string
@@ -31,16 +33,20 @@ class Zone implements \Countable, \IteratorAggregate
     /**
      * Zone constructor.
      *
-     * @param string $name
-     * @param int    $defaultTtl
-     * @param array  $resourceRecords
-     *
-     * @throws \InvalidArgumentException
+     * @param string|null $name
+     * @param int|null    $defaultTtl
+     * @param array       $resourceRecords
      */
     public function __construct(?string $name = null, ?int $defaultTtl = null, array $resourceRecords = [])
     {
-        $this->name = $name;
-        $this->defaultTtl = $defaultTtl;
+        if (null !== $name) {
+            $this->setName($name);
+        }
+
+        if (null !== $defaultTtl) {
+            $this->setDefaultTtl($defaultTtl);
+        }
+
         $this->fromArray($resourceRecords);
     }
 
@@ -61,7 +67,7 @@ class Zone implements \Countable, \IteratorAggregate
     /**
      * @return string
      */
-    public function getName(): ?string
+    public function getName(): string
     {
         return $this->name;
     }
@@ -77,7 +83,7 @@ class Zone implements \Countable, \IteratorAggregate
     /**
      * @param int $defaultTtl
      */
-    public function setDefaultTtl(?int $defaultTtl): void
+    public function setDefaultTtl(int $defaultTtl): void
     {
         $this->defaultTtl = $defaultTtl;
     }
@@ -93,7 +99,7 @@ class Zone implements \Countable, \IteratorAggregate
     /**
      * @param ResourceRecord[] $resourceRecords
      */
-    public function fromArray(array $resourceRecords)
+    public function fromArray(array $resourceRecords): void
     {
         foreach ($resourceRecords as $resourceRecord) {
             $this->addResourceRecord($resourceRecord);
@@ -188,5 +194,42 @@ class Zone implements \Countable, \IteratorAggregate
         }
 
         return Classes::INTERNET;
+    }
+
+    /**
+     * @param mixed $offset
+     *
+     * @return bool
+     */
+    public function offsetExists($offset): bool
+    {
+        return array_key_exists($offset, $this->resourceRecords);
+    }
+
+    /**
+     * @param mixed $offset
+     *
+     * @return ResourceRecord
+     */
+    public function offsetGet($offset): ResourceRecord
+    {
+        return $this->resourceRecords[$offset];
+    }
+
+    /**
+     * @param mixed $offset
+     * @param mixed $value
+     */
+    public function offsetSet($offset, $value): void
+    {
+        $this->resourceRecords[$offset] = $value;
+    }
+
+    /**
+     * @param mixed $offset
+     */
+    public function offsetUnset($offset): void
+    {
+        unset($this->resourceRecords[$offset]);
     }
 }

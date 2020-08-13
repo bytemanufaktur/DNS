@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 /*
  * This file is part of Badcow DNS Library.
  *
@@ -11,6 +13,7 @@
 
 namespace Badcow\DNS;
 
+use Badcow\DNS\Rdata\CNAME;
 use Badcow\DNS\Rdata\NS;
 use Badcow\DNS\Rdata\SOA;
 
@@ -50,10 +53,12 @@ class Validator
      */
     public static function fullyQualifiedDomainName(string $name): bool
     {
-        $isValid = strlen($name) < 254;
-        $isValid &= 1 === preg_match('/^(?:(?!-)[a-z0-9\-]{1,63}(?<!-)\.){1,127}$/i', $name);
+        if ('.' === $name) {
+            return true;
+        }
 
-        return $isValid;
+        return strlen($name) < 254 &&
+            (1 === preg_match('/^(?:(?!-)[a-z0-9\-]{1,63}(?<!-)\.){1,127}$/i', $name));
     }
 
     /**
@@ -66,10 +71,8 @@ class Validator
      */
     public static function resourceRecordName(string $name): bool
     {
-        $isValid = strlen($name) < 254;
-        $isValid &= 1 === preg_match('/(?:^(?:\*\.)?((?!-)[a-z0-9_\-]{1,63}(?<!-)\.?){1,127}$)|^@$|^\*$/i', $name);
-
-        return $isValid;
+        return strlen($name) < 254 &&
+            (1 === preg_match('/(?:^(?:\*\.)?((?!-)[a-z0-9_\-]{1,63}(?<!-)\.?){1,127}$)|^@$|^\*$/i', $name));
     }
 
     /**
@@ -109,7 +112,7 @@ class Validator
      *
      * @static
      *
-     * @param $address
+     * @param string $address
      *
      * @return bool
      */
@@ -148,7 +151,7 @@ class Validator
 
         $totalError = 0;
 
-        $incrementError = function (bool $errorCondition, int $errorOrdinal) use (&$totalError) {
+        $incrementError = function (bool $errorCondition, int $errorOrdinal) use (&$totalError): void {
             $totalError += $errorCondition ? $errorOrdinal : 0;
         };
 
@@ -239,5 +242,110 @@ class Validator
         }
 
         return count($classes);
+    }
+
+    /**
+     * Ensure $zone does not contain existing CNAME alias corresponding to $newRecord's name.
+     *
+     * E.g.
+     *      www IN CNAME example.com.
+     *      www IN TXT "This is a violation of DNS specifications."
+     *
+     * @see https://tools.ietf.org/html/rfc1034#section-3.6.2
+     *
+     * @param Zone           $zone
+     * @param ResourceRecord $newRecord
+     *
+     * @return bool
+     */
+    public static function noAliasInZone(Zone $zone, ResourceRecord $newRecord): bool
+    {
+        foreach ($zone as $rr) {
+            if (CNAME::TYPE === $rr->getType()
+                && $newRecord->getName() === $rr->getName()) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /**
+     * Determine if string is a base64 encoded string.
+     *
+     * @param string $string A base64 encoded string
+     *
+     * @return bool
+     */
+    public static function isBase64Encoded(string $string): bool
+    {
+        if (1 !== preg_match('/^[a-zA-Z0-9\/\r\n+ ]*={0,2}$/', $string)) {
+            return false;
+        }
+
+        if (null === $string = preg_replace('/[^a-zA-Z0-9\/+=]/', '', $string)) {
+            return false;
+        }
+
+        if (false === $decoded = base64_decode($string, true)) {
+            return false;
+        }
+
+        return $string === base64_encode($decoded);
+    }
+
+    /**
+     * Determine if string is a base32 encoded string.
+     *
+     * @param string $string
+     *
+     * @return bool
+     */
+    public static function isBase32Encoded(string $string): bool
+    {
+        return 1 === preg_match('/^[A-Z2-7]+=*$/', $string);
+    }
+
+    /**
+     * Determine if string is a base32hex (extended hex) encoded string.
+     *
+     * @param string $string
+     *
+     * @return bool
+     */
+    public static function isBase32HexEncoded(string $string): bool
+    {
+        return 1 === preg_match('/^[a-zA-Z0-9]+=*$/', $string);
+    }
+
+    /**
+     * Determine if string is a base16 encoded string.
+     *
+     * @param string $string
+     *
+     * @return bool
+     */
+    public static function isBase16Encoded(string $string): bool
+    {
+        return 1 === preg_match('/^[0-9a-f]+$/i', $string);
+    }
+
+    /**
+     * Determine if $integer is an unsigned integer less than 2^$numberOfBits.
+     *
+     * @param int $integer      The integer to test
+     * @param int $numberOfBits The upper limit that the integer can be expressed as an exponent of 2
+     *
+     * @return bool
+     */
+    public static function isUnsignedInteger(int $integer, int $numberOfBits): bool
+    {
+        $maxBits = PHP_INT_SIZE * 8 - 1;
+
+        if ($numberOfBits > $maxBits) {
+            throw new \RuntimeException(sprintf('Number of bits "%d" exceeds maximum binary exponent of "%d".', $numberOfBits, $maxBits));
+        }
+
+        return (0 <= $integer) && ($integer < (2 ** $numberOfBits));
     }
 }

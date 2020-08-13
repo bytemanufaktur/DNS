@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 /*
  * This file is part of Badcow DNS Library.
  *
@@ -43,11 +45,22 @@ class StringIterator extends \ArrayIterator
         return $value !== $this->current();
     }
 
+    public function getRemainingAsString(): string
+    {
+        $string = '';
+        while ($this->valid()) {
+            $string .= $this->current();
+            $this->next();
+        }
+
+        return $string;
+    }
+
     /**
      * @return string
      */
     public function __toString()
     {
-        return implode($this->getArrayCopy());
+        return implode('', $this->getArrayCopy());
     }
 }

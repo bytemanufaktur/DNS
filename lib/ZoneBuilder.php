@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 /*
  * This file is part of Badcow DNS Library.
  *
@@ -11,11 +13,16 @@
 
 namespace Badcow\DNS;
 
-use Badcow\DNS\Rdata\CNAME;
-use Badcow\DNS\Rdata\MX;
+use Badcow\DNS\Parser\Tokens;
 use Badcow\DNS\Rdata\AAAA;
+use Badcow\DNS\Rdata\CNAME;
+use Badcow\DNS\Rdata\DNAME;
+use Badcow\DNS\Rdata\MX;
+use Badcow\DNS\Rdata\NS;
+use Badcow\DNS\Rdata\PTR;
+use Badcow\DNS\Rdata\RdataInterface;
 use Badcow\DNS\Rdata\SOA;
-use Badcow\DNS\Ip\Toolbox;
+use Badcow\DNS\Rdata\SRV;
 
 class ZoneBuilder
 {
@@ -26,9 +33,9 @@ class ZoneBuilder
      */
     public static function build(Zone $zone): string
     {
-        $master = '$ORIGIN '.$zone->getName().PHP_EOL;
+        $master = '$ORIGIN '.$zone->getName().Tokens::LINE_FEED;
         if (null !== $zone->getDefaultTtl()) {
-            $master .= '$TTL '.$zone->getDefaultTtl().PHP_EOL;
+            $master .= '$TTL '.$zone->getDefaultTtl().Tokens::LINE_FEED;
         }
 
         foreach ($zone as $rr) {
@@ -38,7 +45,7 @@ class ZoneBuilder
                     $rr->getTtl(),
                     $rr->getClass(),
                     $rr->getType(),
-                    $rr->getRdata()->output()
+                    $rr->getRdata()->toText()
                 )));
             }
 
@@ -46,7 +53,7 @@ class ZoneBuilder
                 $master .= '; '.$rr->getComment();
             }
 
-            $master .= PHP_EOL;
+            $master .= Tokens::LINE_FEED;
         }
 
         return $master;
@@ -58,7 +65,7 @@ class ZoneBuilder
      *
      * @param Zone $zone
      */
-    public static function fillOutZone(Zone $zone)
+    public static function fillOutZone(Zone $zone): void
     {
         $class = $zone->getClass();
 
@@ -67,44 +74,99 @@ class ZoneBuilder
             $rr->setTtl($rr->getTtl() ?? $zone->getDefaultTtl());
             $rr->setClass($class);
             $rdata = $rr->getRdata();
-
-            if ($rdata instanceof SOA) {
-                $rdata->setMname(self::fullyQualify($rdata->getMname(), $zone->getName()));
-                $rdata->setRname(self::fullyQualify($rdata->getRname(), $zone->getName()));
-            }
-
-            if ($rdata instanceof CNAME) {
-                $rdata->setTarget(self::fullyQualify($rdata->getTarget(), $zone->getName()));
-            }
-
-            if ($rdata instanceof MX) {
-                $rdata->setExchange(self::fullyQualify($rdata->getExchange(), $zone->getName()));
-            }
-
-            if ($rdata instanceof AAAA) {
-                $rdata->setAddress(Toolbox::expandIpv6($rdata->getAddress()));
-            }
+            static::fillOutRdata($rdata, $zone);
         }
     }
 
     /**
      * Add the parent domain to the sub-domain if the sub-domain if it is not fully qualified.
      *
-     * @param string $subdomain
-     * @param string $parent
+     * @param string|null $subDomain
+     * @param string      $parent
      *
      * @return string
      */
-    private static function fullyQualify(string $subdomain, string $parent): string
+    protected static function fullyQualify(?string $subDomain, string $parent): string
     {
-        if ('@' === $subdomain) {
+        if ('@' === $subDomain || null === $subDomain) {
             return $parent;
         }
 
-        if ('.' !== substr($subdomain, -1, 1)) {
-            return $subdomain.'.'.$parent;
+        if ('.' !== substr($subDomain, -1, 1)) {
+            return $subDomain.'.'.$parent;
         }
 
-        return $subdomain;
+        return $subDomain;
+    }
+
+    /**
+     * @param RdataInterface $rdata
+     * @param Zone           $zone
+     */
+    protected static function fillOutRdata(RdataInterface $rdata, Zone $zone): void
+    {
+        $mappings = [
+            SOA::TYPE => 'static::fillOutSoa',
+            CNAME::TYPE => 'static::fillOutCname',
+            DNAME::TYPE => 'static::fillOutCname',
+            SRV::TYPE => 'static::fillOutSrv',
+            NS::TYPE => 'static::fillOutCname',
+            PTR::TYPE => 'static::fillOutCname',
+            MX::TYPE => 'static::fillOutMx',
+            AAAA::TYPE => 'static::fillOutAaaa',
+        ];
+
+        if (!array_key_exists($rdata->getType(), $mappings)) {
+            return;
+        }
+
+        /** @var callable $callable */
+        $callable = $mappings[$rdata->getType()];
+        call_user_func($callable, $rdata, $zone);
+    }
+
+    /**
+     * @param SOA  $rdata
+     * @param Zone $zone
+     */
+    protected static function fillOutSoa(SOA $rdata, Zone $zone): void
+    {
+        $rdata->setMname(self::fullyQualify($rdata->getMname(), $zone->getName()));
+        $rdata->setRname(self::fullyQualify($rdata->getRname(), $zone->getName()));
+    }
+
+    /**
+     * @param CNAME $rdata
+     * @param Zone  $zone
+     */
+    protected static function fillOutCname(Cname $rdata, Zone $zone): void
+    {
+        $rdata->setTarget(self::fullyQualify($rdata->getTarget(), $zone->getName()));
+    }
+
+    /**
+     * @param SRV  $rdata
+     * @param Zone $zone
+     */
+    protected static function fillOutSrv(SRV $rdata, Zone $zone): void
+    {
+        $rdata->setTarget(self::fullyQualify($rdata->getTarget(), $zone->getName()));
+    }
+
+    /**
+     * @param MX   $rdata
+     * @param Zone $zone
+     */
+    protected static function fillOutMx(MX $rdata, Zone $zone): void
+    {
+        $rdata->setExchange(self::fullyQualify($rdata->getExchange(), $zone->getName()));
+    }
+
+    /**
+     * @param AAAA $rdata
+     */
+    protected static function fillOutAaaa(AAAA $rdata): void
+    {
+        $rdata->setAddress(PTR::expandIpv6($rdata->getAddress() ?? ''));
     }
 }

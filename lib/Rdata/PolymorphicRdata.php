@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 /*
  * This file is part of Badcow DNS Library.
  *
@@ -24,9 +26,14 @@ class PolymorphicRdata implements RdataInterface
     private $type;
 
     /**
-     * @var string
+     * @var string|null
      */
     private $data;
+
+    /**
+     * @var int
+     */
+    private $typeCode = 0;
 
     /**
      * PolymorphicRdata constructor.
@@ -34,22 +41,32 @@ class PolymorphicRdata implements RdataInterface
      * @param string|null $type
      * @param string|null $data
      */
-    public function __construct(string $type = null, string $data = null)
+    public function __construct(?string $type = null, ?string $data = null)
     {
-        $this->setType($type);
-        $this->setData($data);
+        if (null !== $type) {
+            $this->setType($type);
+        }
+
+        if (null !== $data) {
+            $this->setData($data);
+        }
     }
 
     /**
      * @param string $type
      */
-    public function setType(?string $type): void
+    public function setType(string $type): void
     {
+        try {
+            $this->typeCode = Types::getTypeCode($type);
+        } catch (UnsupportedTypeException $e) {
+            $this->typeCode = 0;
+        }
         $this->type = $type;
     }
 
     /**
-     * @return string
+     * {@inheritdoc}
      */
     public function getType(): string
     {
@@ -57,26 +74,66 @@ class PolymorphicRdata implements RdataInterface
     }
 
     /**
+     * @param int $typeCode
+     */
+    public function setTypeCode(int $typeCode): void
+    {
+        $this->typeCode = $typeCode;
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    public function getTypeCode(): int
+    {
+        return $this->typeCode;
+    }
+
+    /**
      * @param string $data
      */
-    public function setData(?string $data): void
+    public function setData(string $data): void
     {
         $this->data = $data;
     }
 
     /**
-     * @return string
+     * @return string|null
      */
-    public function getData(): string
+    public function getData(): ?string
     {
         return $this->data;
     }
 
     /**
-     * @return string
+     * {@inheritdoc}
      */
-    public function output(): string
+    public function toText(): string
     {
-        return $this->getData();
+        return $this->getData() ?? '';
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    public function toWire(): string
+    {
+        return $this->data ?? '';
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    public static function fromText(string $text): RdataInterface
+    {
+        return new self(null, $text);
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    public static function fromWire(string $rdata, int &$offset = 0, ?int $rdLength = null): RdataInterface
+    {
+        return new self(null, substr($rdata, $offset, $rdLength ?? strlen($rdata)));
     }
 }

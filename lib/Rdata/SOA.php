@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 /*
  * This file is part of Badcow DNS Library.
  *
@@ -11,6 +13,9 @@
 
 namespace Badcow\DNS\Rdata;
 
+use Badcow\DNS\Parser\TimeFormat;
+use Badcow\DNS\Parser\Tokens;
+
 /**
  * @see https://tools.ietf.org/html/rfc1035#section-3.3.13
  */
@@ -19,12 +24,13 @@ class SOA implements RdataInterface
     use RdataTrait;
 
     const TYPE = 'SOA';
+    const TYPE_CODE = 6;
 
     /**
      * The <domain-name> of the name server that was the
      * original or primary source of data for this zone.
      *
-     * @var string
+     * @var string|null
      */
     private $mname;
 
@@ -32,7 +38,7 @@ class SOA implements RdataInterface
      * A <domain-name> which specifies the mailbox of the
      * person responsible for this zone.
      *
-     * @var string
+     * @var string|null
      */
     private $rname;
 
@@ -40,7 +46,7 @@ class SOA implements RdataInterface
      * The unsigned 32 bit version number of the original copy
      * of the zone.
      *
-     * @var int
+     * @var int|null
      */
     private $serial;
 
@@ -48,7 +54,7 @@ class SOA implements RdataInterface
      * A 32 bit time interval before the zone should be
      * refreshed.
      *
-     * @var int
+     * @var int|null
      */
     private $refresh;
 
@@ -56,7 +62,7 @@ class SOA implements RdataInterface
      * A 32 bit time interval that should elapse before a
      * failed refresh should be retried.
      *
-     * @var int
+     * @var int|null
      */
     private $retry;
 
@@ -65,7 +71,7 @@ class SOA implements RdataInterface
      * the time interval that can elapse before the zone is no
      * longer authoritative.
      *
-     * @var int
+     * @var int|null
      */
     private $expire;
 
@@ -73,7 +79,7 @@ class SOA implements RdataInterface
      * The unsigned 32 bit minimum TTL field that should be
      * exported with any RR from this zone.
      *
-     * @var int
+     * @var int|null
      */
     private $minimum;
 
@@ -158,7 +164,7 @@ class SOA implements RdataInterface
     }
 
     /**
-     * @param $rname
+     * @param string $rname
      */
     public function setRname(string $rname): void
     {
@@ -192,8 +198,18 @@ class SOA implements RdataInterface
     /**
      * {@inheritdoc}
      */
-    public function output(): string
+    public function toText(): string
     {
+        if (!isset($this->mname) ||
+            !isset($this->rname) ||
+            !isset($this->serial) ||
+            !isset($this->refresh) ||
+            !isset($this->retry) ||
+            !isset($this->expire) ||
+            !isset($this->minimum)) {
+            throw new \InvalidArgumentException('All parameters of SOA must be set.');
+        }
+
         return sprintf(
             '%s %s %s %s %s %s %s',
             $this->mname,
@@ -204,5 +220,71 @@ class SOA implements RdataInterface
             $this->expire,
             $this->minimum
         );
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    public function toWire(): string
+    {
+        if (!isset($this->mname) ||
+            !isset($this->rname) ||
+            !isset($this->serial) ||
+            !isset($this->refresh) ||
+            !isset($this->retry) ||
+            !isset($this->expire) ||
+            !isset($this->minimum)) {
+            throw new \InvalidArgumentException('All parameters of SOA must be set.');
+        }
+
+        return
+            self::encodeName($this->mname).
+            self::encodeName($this->rname).
+            pack(
+                'NNNNN',
+                $this->serial,
+                $this->refresh,
+                $this->retry,
+                $this->expire,
+                $this->minimum
+            );
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    public static function fromText(string $text): RdataInterface
+    {
+        $rdata = explode(Tokens::SPACE, $text);
+        $soa = new self();
+        $soa->setMname($rdata[0]);
+        $soa->setRname($rdata[1]);
+        $soa->setSerial((int) $rdata[2]);
+        $soa->setRefresh(TimeFormat::toSeconds($rdata[3]));
+        $soa->setRetry(TimeFormat::toSeconds($rdata[4]));
+        $soa->setExpire(TimeFormat::toSeconds($rdata[5]));
+        $soa->setMinimum(TimeFormat::toSeconds($rdata[6]));
+
+        return $soa;
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    public static function fromWire(string $rdata, int &$offset = 0, ?int $rdLength = null): RdataInterface
+    {
+        $soa = new self();
+        $soa->setMname(self::decodeName($rdata, $offset));
+        $soa->setRname(self::decodeName($rdata, $offset));
+        $parameters = unpack('Nserial/Nrefresh/Nretry/Nexpire/Nminimum', $rdata, $offset);
+        $soa->setSerial((int) $parameters['serial']);
+        $soa->setRefresh(TimeFormat::toSeconds($parameters['refresh']));
+        $soa->setRetry(TimeFormat::toSeconds($parameters['retry']));
+        $soa->setExpire(TimeFormat::toSeconds($parameters['expire']));
+        $soa->setMinimum(TimeFormat::toSeconds($parameters['minimum']));
+
+        $offset += 20;
+
+        return $soa;
     }
 }
